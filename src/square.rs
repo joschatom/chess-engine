@@ -1,13 +1,16 @@
 use crate::bitboard::BitBoard;
 
+enum A {}
+
 macro_rules! simple_enum {
     ($(
         pub enum $name:ident {
             $($variant:ident),*
         }
     )*) => {$(
-        #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, ::strum_macros::EnumString)]
         pub enum $name {
+            #[strum(ascii_case_insensitive = true)]
             $($variant),*
         }
 

@@ -16,7 +16,7 @@ pub enum MoveFlag {
     NullMove,
     Capture(Piece),
     Untargeted,
-    EnPassant,
+    EnPassant(Square),
 }
 
 #[repr(u8)]
@@ -31,6 +31,14 @@ impl core::fmt::Display for Move {
         match self.flag {
             MoveFlag::Castle(CastlingMethod::Long) => f.write_str("O-O-O"),
             MoveFlag::Castle(CastlingMethod::Short) => f.write_str("O-O"),
+            MoveFlag::EnPassant(sq) => f.write_fmt(format_args!(
+                "[EP {:?}]{:?}{:?}",
+                sq,self.starting_square, self.target_square
+            )),
+            MoveFlag::Capture(_) => f.write_fmt(format_args!(
+                "{:?}x{:?}",
+                self.starting_square, self.target_square
+            )),
             MoveFlag::Promotion(p) => f.write_fmt(format_args!(
                 "{:?}{:?}={:?}",
                 self.starting_square, self.target_square, p

@@ -21,7 +21,8 @@ use utils::print_bitboard;
 const STARTING_FEN: &'static str =
     //"8/3k4/8/5n2/6q1/1r1NK3/8/8 w - - 0 1"
     // "8/R6p/6pk/p2pP3/P1b2P2/2P3P1/1rB5/6K1 w - - 5 37";
-    "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    //"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    "5k2/1P6/8/4Pp2/8/1p6/P7/4K2R w K f6 0 1";
 //  "rnbqk1nr/pppppppp/8/2b5/8/8/PPP1P1PP/R3K2R w KQkq - 0 1";
 //"4k3/8/8/2b5/8/8/8/R3K2R w KQ - 0 1"; // NO PAWNS(O-O-O + BLOCKED O-O)
 
@@ -32,6 +33,7 @@ fn main() {
     println!("Material: {:?}", board.count_material());
     println!("Turn: {:?}", board.turn);
     println!("FEN: {:?}", STARTING_FEN);
+    println!("SYNTAX: . = EMPTY, % = ACTIVE");
 
     println!("==== (PRE) MOVE GENERATION ====");
     let start = std::time::Instant::now();
@@ -49,9 +51,6 @@ fn main() {
 
     println!("==== MOVE GENERATION ====");
 
-
-    dbg!(board.squares[Square::E4 as usize]);
-
     let start = std::time::Instant::now();
     let moves = board.generate_moves(Color::White);
     println!("[Color: {:?}]", Color::White);
@@ -64,9 +63,13 @@ fn main() {
             .1;
 
         println!("{}. ({:?}){}", 1 + i, piece, m);
+
+        board.do_move(*m);
+        print_bitboard(board.bitboards.all_pieces(None));
+        board.undo_move(*m);
+
+        println!()
     }
 
     println!();
-
-    print_bitboard(board.bitboards.0[BitBoards::ad_bitboard(Color::Black)]);
 }

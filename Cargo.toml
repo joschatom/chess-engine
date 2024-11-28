@@ -5,3 +5,5 @@ edition = "2021"
 
 [dependencies]
 int-enum = "1.1.2"
+strum = "0.26"
+strum_macros = "0.26"

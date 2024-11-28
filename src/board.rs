@@ -1,4 +1,4 @@
-use std::{cell::LazyCell, collections::HashMap};
+use std::{cell::LazyCell, collections::HashMap, str::FromStr};
 
 use crate::{
     bitboard::BitBoard,
@@ -62,6 +62,14 @@ impl BitBoards {
         self.0[piece as usize] |= mv.target_square.bitboard();
     }
 
+    pub fn undo_move(&mut self, color: Color, piece: Piece, mv: Move) {
+        self.0[color as usize] = self.0[color as usize] & !mv.target_square.bitboard();
+        self.0[piece as usize] = self.0[piece as usize] & !mv.target_square.bitboard();
+
+        self.0[color as usize] |= mv.starting_square.bitboard();
+        self.0[piece as usize] |= mv.starting_square.bitboard();
+    }
+
     pub fn insert_piece(&mut self, square: Square, piece: Piece, color: Color) {
         let mask = 1 << ((square.rank() as usize) * 8 + (square.file() as usize));
 
@@ -78,6 +86,7 @@ pub struct Board {
     pub turn: Color,
     pub castling_availability: [(bool, bool); 2],
     pub en_passant: BitBoard,
+    pub en_passant_prev: BitBoard,
     pub halfmove_count: usize,
     pub move_count: usize,
     pub squares: [Option<(Color, Piece)>; 64],
@@ -92,6 +101,7 @@ impl Board {
             turn: Color::White,
             castling_availability: [(false, false); 2],
             en_passant: BitBoard::EMPTY,
+            en_passant_prev: BitBoard::EMPTY,
             halfmove_count: 0,
             move_count: 1,
             move_filters: [BitBoard::EMPTY; 2],
@@ -143,54 +153,73 @@ impl Board {
         return (Square::new(king_file, rank), Square::new(rook_file, rank));
     }
 
-    fn is_double_move(color: Color, mv: Move) -> bool{
-        mv.starting_square.bitboard().forward(color).forward(color).0
-            & mv.target_square.bitboard().0 != 0
+    fn is_double_move(color: Color, mv: Move) -> bool {
+        mv.starting_square
+            .bitboard()
+            .forward(color)
+            .forward(color)
+            .0
+            & mv.target_square.bitboard().0
+            != 0
     }
 
-    pub fn do_move(&mut self, mv: Move) {
-        let piece = self.squares[mv.starting_square as usize]
+    pub fn do_simple_move(&mut self, piece: Piece, mv: Move) {
+        self.bitboards.r#move(self.turn, piece, mv);
+        self.squares[mv.target_square as usize] = Some((self.turn, piece));
+        self.squares[mv.starting_square as usize] = None;
+    }
+
+    pub fn undo_simple_move(&mut self, piece: Piece, mv: Move) {
+        self.bitboards.undo_move(self.turn, piece, mv);
+        self.squares[mv.starting_square as usize] = self.squares[mv.target_square as usize];
+        self.squares[mv.target_square as usize] = None;
+    }
+
+    pub fn undo_move(&mut self, mv: Move) {
+        self.turn = self.turn.opponent();
+
+        let piece = self.squares[mv.target_square as usize]
             .expect("Invalid Move")
             .1;
 
-        if piece == Piece::Pawn && Self::is_double_move(self.turn, mv) {
-            self.en_passant = mv.starting_square.bitboard().forward(self.turn);
-        }else {
-            self.en_passant = BitBoard::EMPTY;
-        }
-
         match mv.flag {
-            MoveFlag::EnPassant => {
+            MoveFlag::EnPassant(_t) => {
                 assert!(piece == Piece::Pawn, "only pawns can do en passant!");
 
-                let other_pawn = Square::index(mv.target_square.bitboard().backward(self.turn).0.trailing_zeros() as usize);
-            
-                self.bitboards.remove_piece(Piece::Pawn, self.turn.opponent(), other_pawn);
+                let other_pawn = Square::index(
+                    mv.target_square
+                        .bitboard()
+                        .backward(self.turn)
+                        .0
+                        .trailing_zeros() as usize,
+                );
+
+                assert!(_t == other_pawn);
+
+                self.bitboards
+                    .insert_piece(other_pawn, Piece::Pawn, self.turn.opponent());
 
                 self.squares[other_pawn as usize] = None;
 
-                self.bitboards.r#move(self.turn, piece, mv);
-                self.squares[mv.target_square as usize] = Some((self.turn, piece));
+                self.undo_simple_move(piece, mv);
             }
 
             MoveFlag::Capture(target) => {
                 self.bitboards
-                    .remove_piece(target, self.turn.opponent(), mv.target_square);
-                self.bitboards.r#move(self.turn, piece, mv);
-                self.squares[mv.target_square as usize] = Some((self.turn, piece));
+                    .insert_piece(mv.starting_square, target, self.turn);
+                self.undo_simple_move(piece, mv);
             }
 
             MoveFlag::Promotion(target) => {
-                self.bitboards.0[piece as usize].0 &= !mv.starting_square.bitboard().0;
-                self.bitboards.0[target as usize].0 |= mv.target_square.bitboard().0;
-                self.squares[mv.target_square as usize] = Some((self.turn, target));
+                self.bitboards.0[piece as usize].0 &= !mv.target_square.bitboard().0;
+                self.bitboards.0[target as usize].0 &= !mv.target_square.bitboard().0;
+                self.squares[mv.starting_square as usize] = Some((self.turn, Piece::Pawn));
             }
             MoveFlag::Castle(method) => {
                 let (king_target, rook_target) = Self::castling_squares(self.turn, method);
 
                 // King
-                self.bitboards.r#move(
-                    self.turn,
+                self.undo_simple_move(
                     Piece::King,
                     Move {
                         starting_square: Self::CASTLING_SQUARES[self.turn as usize]
@@ -202,8 +231,7 @@ impl Board {
                 );
 
                 // Rook
-                self.bitboards.r#move(
-                    self.turn,
+                self.undo_simple_move(
                     Piece::Rook,
                     Move {
                         starting_square: Self::CASTLING_SQUARES[self.turn as usize]
@@ -216,14 +244,89 @@ impl Board {
             }
             MoveFlag::Untargeted => {}
             MoveFlag::NullMove => {}
-            _ => {
-                self.bitboards.r#move(self.turn, piece, mv);
-                self.squares[mv.target_square as usize] = Some((self.turn, piece));
-            }
+            _ => self.undo_simple_move(piece, mv),
         }
 
-        if mv.flag != MoveFlag::NullMove {
-            self.squares[mv.starting_square as usize] = None;
+        self.move_filters = [BitBoard::EMPTY; 2];
+
+        self.move_count = self.move_count.saturating_sub(1);
+
+        // halfmove clock!!
+    }
+
+    pub fn do_move(&mut self, mv: Move) -> Option<()> {
+        let piece = self.squares[mv.starting_square as usize]?.1;
+
+        if piece == Piece::Pawn && Self::is_double_move(self.turn, mv) {
+            self.en_passant = mv.starting_square.bitboard().forward(self.turn);
+        } else {
+            self.en_passant_prev = self.en_passant;
+            self.en_passant = BitBoard::EMPTY;
+        }
+
+        match mv.flag {
+            MoveFlag::EnPassant(_t) => {
+                assert!(piece == Piece::Pawn, "only pawns can do en passant!");
+
+                let other_pawn = Square::index(
+                    mv.target_square
+                        .bitboard()
+                        .backward(self.turn)
+                        .0
+                        .trailing_zeros() as usize,
+                );
+
+                assert!(other_pawn == _t);
+
+                self.bitboards
+                    .remove_piece(Piece::Pawn, self.turn.opponent(), other_pawn);
+
+                self.squares[other_pawn as usize] = None;
+
+                self.do_simple_move(piece, mv);
+            }
+
+            MoveFlag::Capture(target) => {
+                self.bitboards
+                    .remove_piece(target, self.turn.opponent(), mv.target_square);
+                self.do_simple_move(piece, mv);
+            }
+
+            MoveFlag::Promotion(target) => {
+                self.bitboards.0[piece as usize].0 &= !mv.starting_square.bitboard().0;
+                self.bitboards.0[target as usize].0 |= mv.target_square.bitboard().0;
+                self.squares[mv.target_square as usize] = Some((self.turn, target));
+            }
+            MoveFlag::Castle(method) => {
+                let (king_target, rook_target) = Self::castling_squares(self.turn, method);
+
+                // King
+                self.do_simple_move(
+                    Piece::King,
+                    Move {
+                        starting_square: Self::CASTLING_SQUARES[self.turn as usize]
+                            [method as usize]
+                            .0,
+                        target_square: king_target,
+                        flag: mv.flag,
+                    },
+                );
+
+                // Rook
+                self.do_simple_move(
+                    Piece::Rook,
+                    Move {
+                        starting_square: Self::CASTLING_SQUARES[self.turn as usize]
+                            [method as usize]
+                            .1,
+                        target_square: rook_target,
+                        flag: mv.flag,
+                    },
+                );
+            }
+            MoveFlag::Untargeted => {}
+            MoveFlag::NullMove => {}
+            _ => self.do_simple_move(piece, mv),
         }
 
         self.bitboards.0[BitBoards::ad_bitboard(self.turn.opponent())] = BitBoard::EMPTY;
@@ -235,6 +338,8 @@ impl Board {
         // halfmove clock!!
 
         self.turn = self.turn.opponent();
+
+        Some(())
     }
 
     pub fn generate_moves(&mut self, color: Color) -> Vec<Move> {
@@ -271,19 +376,19 @@ impl Board {
 
                 let mut moves;
 
-                /*if piece == Piece::Rook {
+                if piece == Piece::Rook {
                     moves =
                         self.hacky_rook_fix_moves(color, square, piece_board.0, relevant_blockers)
-                } else {*/
-                moves = self.slider_moves(
-                    piece
-                        .sliders()
-                        .expect("Tried to query sliders moves for a non-slider piece"),
-                    color,
-                    piece_board.0,
-                    relevant_blockers,
-                );
-                //}
+                } else {
+                    moves = self.slider_moves(
+                        piece
+                            .sliders()
+                            .expect("Tried to query sliders moves for a non-slider piece"),
+                        color,
+                        piece_board.0,
+                        relevant_blockers,
+                    );
+                }
 
                 moves = moves & !self.frendly_pieces(color);
 
@@ -292,8 +397,6 @@ impl Board {
                 self.bitboards.0[BitBoards::ad_bitboard(color)] |= moves; // Should this be a side-effect or not?
             }
         }
-
-        println!();
 
         for knight in Self::isolate_pieces(self.bitboards.get_piece_set(Piece::Knight, Some(color)))
         {
@@ -309,7 +412,7 @@ impl Board {
         if self.can_castle_short(color) && !self.in_check(color) {
             out.push(Move {
                 starting_square: self.king_square(color),
-                target_square: Square::A1,
+                target_square: Self::castling_squares(color, CastlingMethod::Short).0,
                 flag: MoveFlag::Castle(CastlingMethod::Short),
             });
         }
@@ -317,7 +420,7 @@ impl Board {
         if self.can_castle_long(color) & !self.in_check(color) {
             out.push(Move {
                 starting_square: self.king_square(color),
-                target_square: Square::A1,
+                target_square: Self::castling_squares(color, CastlingMethod::Long).0,
                 flag: MoveFlag::Castle(CastlingMethod::Long),
             });
         }
@@ -336,7 +439,6 @@ impl Board {
             }
 
             for target_sq in bitboard.active_squares() {
-
                 let piece = self.squares[sq as usize]
                     .map(|(_, p)| p)
                     .expect("Piece exist in bitboard but not in simple board.");
@@ -392,6 +494,20 @@ impl Board {
                             flag: MoveFlag::Promotion(promotion),
                         });
                     }
+
+                    continue;
+                }
+
+                if piece == Piece::Pawn
+                    && (target_sq.bitboard() & self.en_passant != BitBoard::EMPTY)
+                {
+                    out.push(Move {
+                        starting_square: sq,
+                        target_square: target_sq,
+                        flag: MoveFlag::EnPassant(Square::index(
+                            target_sq.bitboard().backward(self.turn).0.trailing_zeros() as usize,
+                        )),
+                    });
 
                     continue;
                 }
@@ -478,7 +594,7 @@ impl Board {
         let mut steps = 0;
 
         // LEFT
-        while position != 0 && square.file() != File::H {
+        while position != 0 {
             steps += 1;
 
             position = position >> 1;
@@ -486,9 +602,7 @@ impl Board {
                 break;
             }
 
-            let target_file = File::index((square.file() as usize) + steps);
-
-            out |= BitBoard(1 << (Square::new(target_file, rank) as u64));
+            out |= BitBoard(position);
 
             if position & BitBoard::CORNERS.0 != 0 {
                 break;
@@ -499,7 +613,7 @@ impl Board {
         position = start_position;
 
         // RIGHT
-        while position != 0 && square.file() != File::A {
+        while position != 0 {
             steps += 1;
 
             position = position << 1;
@@ -507,49 +621,43 @@ impl Board {
                 break;
             }
 
-            let target_file = File::index((square.file() as usize) + steps);
-
-            out |= BitBoard(1 << (Square::new(target_file, rank) as u64));
+            out |= BitBoard(position);
 
             if position & BitBoard::CORNERS.0 != 0 {
                 break;
             }
         }
 
-        // UP
-        while position != 0 && rank as usize != 7 {
-            steps += 1;
+        position = start_position;
 
-            if steps + (rank as usize) == 8 {
+        // UP
+        while position != 0 {
+            position = position << 8;
+            if position & relevant_blockers.0 != 0 {
                 break;
             }
 
+            out |= BitBoard(position);
+
+            if position & (Rank::Eighth.bitboard() & Rank::First.bitboard()).0 != 0 {
+                break;
+            }
+        }
+
+        position = start_position;
+
+        // DOWN
+        while position != 0 {
             position = position >> 8;
             if position & relevant_blockers.0 != 0 {
                 break;
             }
 
-            let target_rank = Rank::index((rank as usize) + steps);
+            out |= BitBoard(position);
 
-            out |= BitBoard(1 << (Square::new(square.file(), target_rank) as u64));
-        }
-
-        steps = 0;
-        position = start_position;
-
-        // DOWN
-        while position != 0 && rank as usize != 0 {
-            steps += 1;
-
-            position = position << 8;
-
-            if position & relevant_blockers.0 != 0 {
+            if position & BitBoard::CORNERS.0 != 0 {
                 break;
             }
-
-            let target_rank = Rank::index((rank as usize).saturating_sub(steps));
-
-            out |= BitBoard(1 << (Square::new(square.file(), target_rank) as u64));
         }
 
         out & BitBoard(!start_position)
@@ -820,9 +928,18 @@ impl Board {
             }
         }
 
-        // TODO: EN PASSANT
+        'en_passant: {
+            let name = parts.next()?;
 
-        _ = parts.next()?;
+            if name.contains('-') {
+                break 'en_passant;
+            }
+
+            match Square::from_str(name.trim().to_ascii_uppercase().as_str()) {
+                Ok(sq) => result.en_passant = sq.bitboard(),
+                Err(e) => eprintln!("Failed to load FEN: {}, {:?}", e.to_string(), name),
+            }
+        };
 
         result.halfmove_count = parts.next()?.parse().ok()?;
         result.move_count = parts.next()?.parse().ok()?;
