@@ -8,9 +8,9 @@ macro_rules! simple_enum {
             $($variant:ident),*
         }
     )*) => {$(
-        #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, ::strum_macros::EnumString)]
+        #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, ::strum_macros::EnumString, ::strum_macros::Display)]
+        #[strum(ascii_case_insensitive)]
         pub enum $name {
-            #[strum(ascii_case_insensitive = true)]
             $($variant),*
         }
 

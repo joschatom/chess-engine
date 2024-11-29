@@ -33,7 +33,7 @@ impl core::fmt::Display for Move {
             MoveFlag::Castle(CastlingMethod::Short) => f.write_str("O-O"),
             MoveFlag::EnPassant(sq) => f.write_fmt(format_args!(
                 "[EP {:?}]{:?}{:?}",
-                sq,self.starting_square, self.target_square
+                sq, self.starting_square, self.target_square
             )),
             MoveFlag::Capture(_) => f.write_fmt(format_args!(
                 "{:?}x{:?}",

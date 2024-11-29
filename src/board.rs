@@ -63,20 +63,17 @@ impl BitBoards {
     }
 
     pub fn undo_move(&mut self, color: Color, piece: Piece, mv: Move) {
-        self.0[color as usize] = self.0[color as usize] & !mv.target_square.bitboard();
-        self.0[piece as usize] = self.0[piece as usize] & !mv.target_square.bitboard();
+        self.0[color as usize].0 = self.0[color as usize].0 & !mv.target_square.bitboard().0;
+        self.0[piece as usize].0 = self.0[piece as usize].0 & !mv.target_square.bitboard().0;
 
         self.0[color as usize] |= mv.starting_square.bitboard();
         self.0[piece as usize] |= mv.starting_square.bitboard();
     }
 
     pub fn insert_piece(&mut self, square: Square, piece: Piece, color: Color) {
-        let mask = 1 << ((square.rank() as usize) * 8 + (square.file() as usize));
+        self.0[(color as u8) as usize] |= square.bitboard();
 
-        self.0[(color as u8) as usize] |= BitBoard(mask);
-
-        self.0[(piece as u8) as usize] |=
-            BitBoard(1 << ((square.rank() as usize) * 8 + (square.file() as usize)));
+        self.0[(piece as u8) as usize] |= square.bitboard();
     }
 }
 
@@ -108,6 +105,10 @@ impl Board {
         }
     }
 
+    pub fn prepare(&mut self) {
+        _ = self.generate_moves(self.turn.opponent());
+    }
+
     pub fn count_material(&self) -> (u32, u32) {
         let mut white_material = 0;
         let mut black_material = 0;
@@ -130,9 +131,11 @@ impl Board {
         (white_material, black_material)
     }
 
-    pub fn frendly_pieces(&self, color: Color) -> BitBoard {
+    pub fn pieces(&self, color: Color) -> BitBoard {
         self.bitboards.all_pieces(Some(color))
     }
+
+    pub fn next_turn(&mut self) {}
 
     fn castling_squares(color: Color, castling_method: CastlingMethod) -> (Square, Square) {
         let king_file = match castling_method {
@@ -171,21 +174,40 @@ impl Board {
 
     pub fn undo_simple_move(&mut self, piece: Piece, mv: Move) {
         self.bitboards.undo_move(self.turn, piece, mv);
-        self.squares[mv.starting_square as usize] = self.squares[mv.target_square as usize];
+        self.squares[mv.starting_square as usize] = Some((self.turn, piece));
         self.squares[mv.target_square as usize] = None;
     }
 
-    pub fn undo_move(&mut self, mv: Move) {
-        self.turn = self.turn.opponent();
+    pub fn get_piece_type(&self, sq: Square) -> Option<Piece> {
+        if let Some((_, p)) = self.squares[sq as usize] {
+            return Some(p);
+        }
 
-        let piece = self.squares[mv.target_square as usize]
-            .expect("Invalid Move")
-            .1;
+        for piece in Piece::ALL {
+            if (self.bitboards.get_piece_set(piece, None) & sq.bitboard()).0 != 0 {
+                return Some(piece);
+            }
+        }
+
+        None
+    }
+
+    pub fn undo_move(&mut self, mv: Move) -> Option<()> {
+        // println!("DEBUG: UndoMove(mv = {:?}), Turn: {:?}", mv, self.turn);
+
+        _ = match self.get_piece_type(mv.target_square) {
+            None => {
+                print_bitboard(self.bitboards.all_pieces(None));
+                println!("Turn: {:?}", self.turn);
+                panic!();
+            }
+            Some(v) => v,
+        };
+
+        self.turn = self.turn.opponent();
 
         match mv.flag {
             MoveFlag::EnPassant(_t) => {
-                assert!(piece == Piece::Pawn, "only pawns can do en passant!");
-
                 let other_pawn = Square::index(
                     mv.target_square
                         .bitboard()
@@ -199,20 +221,21 @@ impl Board {
                 self.bitboards
                     .insert_piece(other_pawn, Piece::Pawn, self.turn.opponent());
 
-                self.squares[other_pawn as usize] = None;
+                self.squares[other_pawn as usize] = Some((self.turn.opponent(), Piece::Pawn));
 
-                self.undo_simple_move(piece, mv);
+                self.undo_simple_move(Piece::Pawn, mv);
             }
 
             MoveFlag::Capture(target) => {
+                self.undo_simple_move(self.get_piece_type(mv.target_square)?, mv);
                 self.bitboards
-                    .insert_piece(mv.starting_square, target, self.turn);
-                self.undo_simple_move(piece, mv);
+                    .insert_piece(mv.target_square, target, self.turn);
+                self.squares[mv.target_square as usize] = Some((self.turn, target));
             }
 
             MoveFlag::Promotion(target) => {
-                self.bitboards.0[piece as usize].0 &= !mv.target_square.bitboard().0;
                 self.bitboards.0[target as usize].0 &= !mv.target_square.bitboard().0;
+                self.bitboards.0[Piece::Pawn as usize] |= mv.starting_square.bitboard();
                 self.squares[mv.starting_square as usize] = Some((self.turn, Piece::Pawn));
             }
             MoveFlag::Castle(method) => {
@@ -244,18 +267,32 @@ impl Board {
             }
             MoveFlag::Untargeted => {}
             MoveFlag::NullMove => {}
-            _ => self.undo_simple_move(piece, mv),
+            _ => self.undo_simple_move(self.get_piece_type(mv.target_square)?, mv),
         }
 
         self.move_filters = [BitBoard::EMPTY; 2];
 
+        self.en_passant = self.en_passant_prev;
+        self.en_passant_prev = BitBoard::EMPTY;
+
         self.move_count = self.move_count.saturating_sub(1);
 
         // halfmove clock!!
+
+        Some(())
     }
 
     pub fn do_move(&mut self, mv: Move) -> Option<()> {
-        let piece = self.squares[mv.starting_square as usize]?.1;
+        //  println!("DEBUG: DoMove(mv = {:?})", mv);
+
+        let piece = match self.get_piece_type(mv.starting_square) {
+            None => {
+                print_bitboard(self.bitboards.all_pieces(None));
+                println!("Turn: {:?}", self.turn);
+                panic!();
+            }
+            Some(v) => v,
+        };
 
         if piece == Piece::Pawn && Self::is_double_move(self.turn, mv) {
             self.en_passant = mv.starting_square.bitboard().forward(self.turn);
@@ -329,8 +366,6 @@ impl Board {
             _ => self.do_simple_move(piece, mv),
         }
 
-        self.bitboards.0[BitBoards::ad_bitboard(self.turn.opponent())] = BitBoard::EMPTY;
-
         self.move_filters = [BitBoard::EMPTY; 2];
 
         self.move_count += 1;
@@ -348,7 +383,7 @@ impl Board {
 
         let pawns = self.bitboards.get_piece_set(Piece::Pawn, Some(color));
 
-        let king_moves = self.king_moves(color) & !self.frendly_pieces(color);
+        let king_moves = self.king_moves(color) & !self.pieces(color);
 
         self.bitboards.0[BitBoards::ad_bitboard(color)] |= king_moves;
         move_bitboards.insert(self.king_square(color), king_moves);
@@ -361,7 +396,7 @@ impl Board {
             let square = Square::index(pawn.0.trailing_zeros() as _);
 
             let (ad, moves) = self.pawn_moves(pawn, color);
-            move_bitboards.insert(square, moves & !self.frendly_pieces(color));
+            move_bitboards.insert(square, moves & !self.pieces(color));
             self.bitboards.0[BitBoards::ad_bitboard(color)] |= ad;
         }
 
@@ -390,7 +425,7 @@ impl Board {
                     );
                 }
 
-                moves = moves & !self.frendly_pieces(color);
+                moves = moves & !self.pieces(color);
 
                 move_bitboards.insert(square, moves);
 
@@ -402,7 +437,7 @@ impl Board {
         {
             let sq = Square::index(knight.0.trailing_zeros() as _);
 
-            let moves = KNIGHT_MOVES[sq as usize] & !self.frendly_pieces(color);
+            let moves = KNIGHT_MOVES[sq as usize] & !self.pieces(color);
 
             self.bitboards.0[BitBoards::ad_bitboard(color)] |= moves;
 
@@ -420,28 +455,19 @@ impl Board {
         if self.can_castle_long(color) & !self.in_check(color) {
             out.push(Move {
                 starting_square: self.king_square(color),
-                target_square: Self::castling_squares(color, CastlingMethod::Long).0,
+                target_square: Self::castling_squares(color, CastlingMethod::Long).1,
                 flag: MoveFlag::Castle(CastlingMethod::Long),
             });
         }
 
         'conv: for (sq, bitboard) in move_bitboards {
-            if sq.bitboard() & pinned != BitBoard::EMPTY {
-                println!(
-                    "Filtered Move: {}",
-                    Move {
-                        starting_square: sq,
-                        target_square: Square::A1,
-                        flag: MoveFlag::Untargeted,
-                    }
-                );
-                continue 'conv;
-            }
-
             for target_sq in bitboard.active_squares() {
-                let piece = self.squares[sq as usize]
-                    .map(|(_, p)| p)
-                    .expect("Piece exist in bitboard but not in simple board.");
+                if target_sq.bitboard() & self.pieces(color) != BitBoard::EMPTY {
+                    eprintln!("BUG: Tried to capture a same-colored piece.");
+                    continue;
+                }
+
+                let piece = self.get_piece_type(sq).expect("failed to get piece type.");
 
                 if (piece == Piece::Rook && sq.file() == File::H)
                     && self.castling_availability[color as usize].0
@@ -512,12 +538,20 @@ impl Board {
                     continue;
                 }
 
-                if target_sq.bitboard() & self.frendly_pieces(color.opponent()) != BitBoard::EMPTY {
+                if (target_sq.bitboard() & self.bitboards.all_pieces(Some(color.opponent())))
+                    != BitBoard::EMPTY
+                {
+                    if self.squares[target_sq as usize].is_none() {
+                        continue;
+                    }
+
                     out.push(Move {
                         starting_square: sq,
                         target_square: target_sq,
                         flag: MoveFlag::Capture(self.squares[target_sq as usize].unwrap().1),
                     });
+
+                    continue;
                 }
 
                 out.push(Move {
@@ -559,7 +593,7 @@ impl Board {
             || (color == Color::Black && square.rank() == Rank::Seventh)
         {
             moves |= pawn.forward(color).forward(color)
-                & !(self.blockers() | self.blockers().forward(color))
+                & !(self.blockers() | (self.blockers() & square.file().bitboard()).forward(color))
         }
 
         let capture_mask: BitBoard = match square.file() {
@@ -739,7 +773,7 @@ impl Board {
 
                 ray |= position;
 
-                if position & self.frendly_pieces(color) != BitBoard::EMPTY {
+                if position & self.pieces(color) != BitBoard::EMPTY {
                     if pinned.is_some() {
                         break;
                     }
@@ -836,7 +870,7 @@ impl Board {
     pub fn king_moves(&self, color: Color) -> BitBoard {
         let board = self.bitboards.get_piece_set(Piece::King, Some(color)).0;
 
-        assert!(board.count_ones() == 1);
+        assert_eq!(board.count_ones(), 1);
 
         let square = Square::index(board.trailing_zeros() as usize);
 

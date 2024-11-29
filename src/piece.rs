@@ -41,6 +41,17 @@ impl Piece {
     pub const SLIDING: [Piece; 3] = [Self::Bishop, Self::Rook, Self::Queen];
     pub const PROMOTIONS: [Piece; 4] = [Self::Bishop, Self::Rook, Self::Knight, Self::Queen];
 
+    pub fn notation(&self) -> char {
+        match self {
+            Self::King => 'K',
+            Self::Queen => 'Q',
+            Self::Knight => 'N',
+            Self::Bishop => 'B',
+            Self::Pawn => 'P',
+            Self::Rook => 'R',
+        }
+    }
+
     pub fn possible_moves(&self, square: Square) -> BitBoard {
         match self {
             Self::Bishop => BISHOP_MOVES[square as usize],

@@ -67,11 +67,22 @@ impl BitBoard {
 
     pub fn shl(self, bits: u8) -> Self {
         assert!(bits <= 64);
+        // assert!(self.0.leading_zeros() + 1 >= bits as _, "Cannot shift value {:b} {} bits to the left.", self.0, bits);
+
+        if self.0.checked_shl(bits as _).is_none() {
+            eprintln!("DEBUG: Stopping Bitboard overflow!");
+            return self;
+        }
+
         Self(self.0 << bits)
     }
 
     pub fn shr(self, bits: u8) -> Self {
         assert!(bits <= 64);
+        if self.0.checked_shr(bits as _).is_none() {
+            eprintln!("DEBUG: Stopping Bitboard overflow!");
+            return self;
+        }
         Self(self.0 >> bits)
     }
 

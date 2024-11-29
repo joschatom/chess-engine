@@ -19,6 +19,57 @@ pub fn print_bitboard(board: BitBoard) {
     }
 }
 
+pub fn perft(board: &mut Board, depth: u32) -> u64 {
+    if depth == 0 {
+        // println!("{}", path);
+
+        return 1;
+    }
+
+    let mut nodes = 0;
+
+    for r#move in board.generate_moves(board.turn) {
+        let res;
+
+        // println!("[Depth: {}]", depth);
+
+        // println!("{} {}", path, r#move);
+
+        board.do_move(r#move).unwrap();
+
+        res = perft(board, depth - 1);
+        board.undo_move(r#move).unwrap();
+
+        if depth == 1 {
+            let piece = board
+                .get_piece_type(r#move.starting_square)
+                .expect("...? 01");
+
+            if piece == Piece::Pawn {
+                println!(
+                    "({}{}) {} {}",
+                    r#move.starting_square.to_string().to_lowercase(),
+                    r#move.target_square.to_string().to_lowercase(),
+                    r#move.target_square.to_string().to_lowercase(),
+                    res
+                );
+            } else {
+                println!(
+                    "({}{}) {}{} {}",
+                    r#move.starting_square.to_string().to_lowercase(),
+                    r#move.target_square.to_string().to_lowercase(),
+                    piece.notation(),
+                    r#move.target_square.to_string().to_lowercase(),
+                    res
+                );
+            }
+        }
+        nodes += res;
+    }
+
+    nodes
+}
+
 pub fn build_king_moves_lookup() -> [BitBoard; Square::NUM] {
     let mut out = [BitBoard::EMPTY; Square::NUM];
 
@@ -123,7 +174,14 @@ macro_rules! timed_block {
     };
 }
 
-use crate::{bitboard::BitBoard, square::Square};
+use std::fmt::format;
+
+use crate::{
+    bitboard::BitBoard,
+    board::{self, Board},
+    square::Square,
+    Color, Piece,
+};
 
 pub fn generate_knight_move_magics() -> [BitBoard; Square::NUM] {
     let mut out: [BitBoard; Square::NUM] = [BitBoard::EMPTY; Square::NUM];
