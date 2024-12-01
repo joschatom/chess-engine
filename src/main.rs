@@ -5,6 +5,7 @@ use std::{io::Read, num::NonZero, time::Instant};
 use board::{BitBoards, Board};
 
 pub mod bitboard;
+mod tests;
 pub mod board;
 pub mod hardcoded_moves;
 pub(crate) mod macros;
