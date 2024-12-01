@@ -1,6 +1,6 @@
 // A Simple chess engine.
 
-use std::{io::Read, time::Instant};
+use std::{io::Read, num::NonZero, time::Instant};
 
 use board::{BitBoards, Board};
 
@@ -75,26 +75,70 @@ fn main() {
         let mut board = Board::load_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1".to_owned()).unwrap();
     */
 
-    board.prepare();
+    // board.prepare();
 
-    board.do_move(Move {
-        starting_square: Square::E2,
-        target_square: Square::E4,
-        flag: r#move::MoveFlag::None,
-    });
+    /*board.do_move(Move {
+            starting_square: Square::E2,
+            target_square: Square::E4,
+            flag: r#move::MoveFlag::None,
+        });
 
-    board.do_move(Move {
-        starting_square: Square::B8,
-        target_square: Square::A6,
-        flag: r#move::MoveFlag::None,
-    });
+        board.do_move(Move {
+            starting_square: Square::B8,
+            target_square: Square::A6,
+            flag: r#move::MoveFlag::None,
+        });
+
+        board.do_move(Move {
+            starting_square: Square::F1,
+            target_square: Square::A6,
+            flag: r#move::MoveFlag::Capture(Piece::Knight),
+        });
+    */
+    //print_bitboard(board.bitboards.all_pieces(None));
 
     println!();
 
-    let start = Instant::now();
-    let v = perft(&mut board, 1);
+    let mv = Move {
+        starting_square: Square::C2,
+        target_square: Square::C4,
+        flag: r#move::MoveFlag::None,
+    };
+
+    board.do_move(mv);
+
+    print_bitboard(board.bitboards.all_pieces(None));
+    println!();
+
+    board.undo_move(mv);
+
+    print_bitboard(board.bitboards.all_pieces(None));
+
+    /*board.do_move(Move {
+        starting_square: Square::C2,
+        target_square: Square::C3,
+        flag: r#move::MoveFlag::None,
+    });
+
+    board.do_move(Move {
+        starting_square: Square::A7,
+        target_square: Square::A5,
+        flag: r#move::MoveFlag::None,
+    });
+
+    board.do_move(Move {
+        starting_square: Square::D1,
+        target_square: Square::A5,
+        flag: r#move::MoveFlag::None,
+    });*/
+
+    board.prepare();
+
+    let mut start = Instant::now();
+    let v = perft(&mut board, 4, 4);
     let time = Instant::now() - start;
 
+    start = Instant::now();
     println!(
         "[Nodes: {}]\n[Time]\n  Total: {:?}\n  Avg. Per Node: {:?}\n",
         v,

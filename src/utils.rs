@@ -19,7 +19,21 @@ pub fn print_bitboard(board: BitBoard) {
     }
 }
 
-pub fn perft(board: &mut Board, depth: u32) -> u64 {
+pub fn safe_shl(v: u64, b: u32) -> u64 {
+    match v.checked_shl(b) {
+        Some(r) => r,
+        None => dbg!(v),
+    }
+}
+
+pub fn safe_shr(v: u64, b: u32) -> u64 {
+    match v.checked_shr(b) {
+        Some(r) => r,
+        None => dbg!(v),
+    }
+}
+
+pub fn perft(board: &mut Board, start_depth: u32, depth: u32) -> u64 {
     if depth == 0 {
         // println!("{}", path);
 
@@ -27,6 +41,13 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
     }
 
     let mut nodes = 0;
+    /*    if depth == 1 {
+            println!("BOARD:");
+            print_bitboard(board.bitboards.all_pieces(None));
+        }
+    */
+
+    // board.prepare();
 
     for r#move in board.generate_moves(board.turn) {
         let res;
@@ -35,12 +56,23 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
 
         // println!("{} {}", path, r#move);
 
+        let before = board.turn;
+
+        //:w;:wprint_bitboard(board.bitboards.0[BitBoards::ad_bitboard(board.turn.opponent())]);
         board.do_move(r#move).unwrap();
 
-        res = perft(board, depth - 1);
+        res = perft(board, start_depth, depth - 1);
         board.undo_move(r#move).unwrap();
 
-        if depth == 1 {
+        let after = board.turn;
+
+        if before != after {
+            eprintln!("Undo/Do Move is borken,");
+        }
+
+        nodes += res;
+
+        if depth == start_depth {
             let piece = board
                 .get_piece_type(r#move.starting_square)
                 .expect("...? 01");
@@ -63,8 +95,10 @@ pub fn perft(board: &mut Board, depth: u32) -> u64 {
                     res
                 );
             }
+
+            // print_bitboard(board.bitboards.0[BitBoards::ad_bitboard(board.turn)])
         }
-        nodes += res;
+        //nodes += res;
     }
 
     nodes
@@ -174,11 +208,12 @@ macro_rules! timed_block {
     };
 }
 
+use core::borrow;
 use std::fmt::format;
 
 use crate::{
     bitboard::BitBoard,
-    board::{self, Board},
+    board::{self, BitBoards, Board},
     square::Square,
     Color, Piece,
 };
