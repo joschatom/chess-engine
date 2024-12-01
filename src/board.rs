@@ -1,7 +1,13 @@
 use std::{cell::LazyCell, collections::HashMap, str::FromStr};
 
 use crate::{
-    bitboard::{self, BitBoard}, hardcoded_moves::KNIGHT_MOVES, r#move::{CastlingMethod, Move, MoveFlag}, piece::{self, Color, Piece}, square::*, utils::{self, print_bitboard}
+    bitboard::{self, BitBoard},
+    hardcoded_moves::KNIGHT_MOVES,
+    piece::{self, Color, Piece},
+    r#move::{CastlingMethod, Move, MoveFlag},
+    square::*,
+    utils::{self, print_bitboard},
+    Slider,
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -39,9 +45,8 @@ impl BitBoards {
 
     pub fn sliding_pieces(&self, color: Color) -> BitBoard {
         self.get_piece_set(Piece::Bishop, Some(color))
-            |         self.get_piece_set(Piece::Queen, Some(color))
-|         self.get_piece_set(Piece::Rook, Some(color))
-
+            | self.get_piece_set(Piece::Queen, Some(color))
+            | self.get_piece_set(Piece::Rook, Some(color))
     }
 
     pub fn remove_piece(&mut self, piece: Piece, color: Color, square: Square) {
@@ -478,9 +483,7 @@ impl Board {
             }
 
             if pinned.contains_key(&sq) {
-                eprint!("INFO: Restricting Pinned Piece on {}", sq);
-
-                bitboard = bitboard & *pinned.get(&sq).unwrap();
+                continue 'conv;
             }
 
             for target_sq in bitboard.active_squares() {
@@ -510,7 +513,7 @@ impl Board {
                 if self.in_check(color) {
                     let (checks, rays) = checkers;
                     if checks == 1 && piece != Piece::King {
-                        if (target_sq.bitboard() & !rays).0 == 0 {
+                        if (target_sq.bitboard() & rays).0 == 0 {
                             /*println!(
                                 "Filtered Move: {}",
                                 Move {
@@ -737,6 +740,7 @@ impl Board {
 
         for slider in sliders {
             let mut position = start_position;
+            let mut hits: i32 = 0;
 
             for _ in 1..8 {
                 position = utils::safe_shr(
@@ -744,10 +748,14 @@ impl Board {
                     slider.right as _,
                 );
 
-                out |= BitBoard(position);
-
                 if position & relevant_blockers.0 != 0 {
+                    if hits == 0 {
+                        out |= BitBoard(position);
+                    }
+
                     break;
+                } else if hits == 0 {
+                    out |= BitBoard(position);
                 }
 
                 /* if position & BitBoard::CORNERS.0 != 0 {
@@ -774,7 +782,6 @@ impl Board {
         }
     }
 
-  
     // (enemy pieces that pin a piece, pinned pieces, checkers)
     pub fn pinned_pieces(&mut self, color: Color) -> (HashMap<Square, BitBoard>, (u32, BitBoard)) {
         let mut out = (0, BitBoard::EMPTY);
@@ -795,20 +802,26 @@ impl Board {
         out.0 += checkers.0.count_ones();
         out.1 |= checkers;
 
-        println!();
-
-
-
         for slider in Piece::Queen.sliders().unwrap() {
-            position = self.bitboards.get_piece_set(Piece::King, Some(color));
+            position = self.king_square(color).bitboard();
 
             //let v = Piece::Queen.possible_moves(Square::index(position.0.trailing_zeros() as _)) & self.bitboards.sliding_pieces(color.opponent());
-        
+
             //print_bitboard(v);
 
             let mut pinned = None;
 
             let mut ray = position;
+
+            let cannot_pin = match *slider {
+                Slider::DOWN | Slider::LEFT | Slider::RIGHT | Slider::UP => {
+                    self.bitboards.get_piece_set(Piece::Bishop, None)
+                }
+                Slider::LEFTDOWN | Slider::LEFTUP | Slider::RIGHTDOWN | Slider::RIGHTUP => {
+                    self.bitboards.get_piece_set(Piece::Rook, None)
+                }
+                s => unreachable!("Unhandled Slider: {:?}", s),
+            };
 
             for _index in 1..8 {
                 position = BitBoard(utils::safe_shr(
@@ -819,30 +832,21 @@ impl Board {
                 ray |= position;
 
                 if position & self.pieces(color) != BitBoard::EMPTY {
-
-                    
-
                     if pinned.is_some() {
                         break;
-                    
                     }
 
                     pinned = Some(Square::index(position.0.trailing_zeros() as _));
-
-                    continue;
                 }
 
-                let enemy_piece = position & (self.bitboards.sliding_pieces(color));
-
-                if position == Square::A5.bitboard() {
-                    print!("HIT");
-                }
+                let enemy_piece = position & (self.bitboards.sliding_pieces(color.opponent()));
 
                 if enemy_piece != BitBoard::EMPTY {
-                   // print_bitboard(enemy_piece);
+                    if enemy_piece & cannot_pin != BitBoard::EMPTY {
+                        break;  
+                    }
 
-                    println!("PIN ON {:?}", Square::index(position.0.trailing_zeros() as _));
-
+                    // print_bitboard(enemy_piece);
 
                     // In Check
                     if pinned.is_none() {
@@ -852,12 +856,17 @@ impl Board {
                         break;
                     }
 
-                    pinned_pieces.insert(pinned.unwrap(), ray);
+                    pinned_pieces.insert(pinned.expect("unreachable"), ray);
                 }
 
-            
-            }
+                if position & self.pieces(color.opponent()) != BitBoard::EMPTY {
+                    break;
+                }
 
+                if position & BitBoard::CORNERS != BitBoard::EMPTY {
+                    break;
+                }
+            }
         }
 
         (pinned_pieces, out)

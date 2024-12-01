@@ -116,9 +116,9 @@ fn main() {
 
     print_bitboard(board.bitboards.all_pieces(None));
 
-    board.do_move(Move {
-        starting_square: Square::C2,
-        target_square: Square::C3,
+    /*  board.do_move(Move {
+        starting_square: Square::D2,
+        target_square: Square::D3,
         flag: r#move::MoveFlag::None,
     });
 
@@ -128,18 +128,16 @@ fn main() {
         flag: r#move::MoveFlag::None,
     });
 
-    board.do_move(Move {
-        starting_square: Square::D1,
-        target_square: Square::A5,
-        flag: r#move::MoveFlag::None,
-    });
-
-    dbg!(board.pinned_pieces(Color::Black));
-
+        board.do_move(Move {
+            starting_square: Square::D1,
+            target_square: Square::A4,
+            flag: r#move::MoveFlag::None,
+        });
+    */
     print_bitboard(board.pieces(Color::White));
 
     let mut start = Instant::now();
-    let v = perft(&mut board, 1, 1);
+    let v = perft(&mut board, 4, 4);
     let time = Instant::now() - start;
 
     start = Instant::now();

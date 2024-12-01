@@ -4,12 +4,22 @@ use crate::hardcoded_moves::{BISHOP_MOVES, KING_MOVES, KNIGHT_MOVES};
 use crate::sliders_gen;
 use crate::{bitboard::BitBoard, square::*};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Slider {
     pub left: u8,
     pub right: u8,
 }
 
 impl Slider {
+    pub const UP: Slider = Self { left: 8, right: 0 };
+    pub const DOWN: Slider = Self { left: 0, right: 8 };
+    pub const LEFT: Slider = Self { left: 1, right: 0 };
+    pub const RIGHT: Slider = Self { left: 0, right: 1 };
+    pub const LEFTUP: Slider = Self { left: 9, right: 0 };
+    pub const RIGHTUP: Slider = Self { left: 7, right: 0 };
+    pub const LEFTDOWN: Slider = Self { left: 0, right: 9 };
+    pub const RIGHTDOWN: Slider = Self { left: 0, right: 7 };
+
     pub const fn new(left: u8, right: u8) -> Self {
         assert!(left <= 64);
         assert!(right <= 64);
