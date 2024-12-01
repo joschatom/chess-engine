@@ -112,9 +112,11 @@ fn main() {
 
     board.undo_move(mv);
 
+    // board = Board::load_fen("8/8/2k5/8/8/8/1K1P1r2/8 w - - 0 1".to_owned()).unwrap();
+
     print_bitboard(board.bitboards.all_pieces(None));
 
-    /*board.do_move(Move {
+    board.do_move(Move {
         starting_square: Square::C2,
         target_square: Square::C3,
         flag: r#move::MoveFlag::None,
@@ -130,12 +132,14 @@ fn main() {
         starting_square: Square::D1,
         target_square: Square::A5,
         flag: r#move::MoveFlag::None,
-    });*/
+    });
 
-    board.prepare();
+    dbg!(board.pinned_pieces(Color::Black));
+
+    print_bitboard(board.pieces(Color::White));
 
     let mut start = Instant::now();
-    let v = perft(&mut board, 4, 4);
+    let v = perft(&mut board, 1, 1);
     let time = Instant::now() - start;
 
     start = Instant::now();

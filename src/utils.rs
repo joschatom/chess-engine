@@ -47,7 +47,7 @@ pub fn perft(board: &mut Board, start_depth: u32, depth: u32) -> u64 {
         }
     */
 
-    // board.prepare();
+    board.prepare();
 
     for r#move in board.generate_moves(board.turn) {
         let res;

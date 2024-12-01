@@ -1,7 +1,7 @@
 use std::{cell::LazyCell, collections::HashMap, str::FromStr};
 
 use crate::{
-    bitboard::BitBoard, hardcoded_moves::KNIGHT_MOVES, r#move::{CastlingMethod, Move, MoveFlag}, piece::{self, Color, Piece}, square::*, utils::{self, print_bitboard}
+    bitboard::{self, BitBoard}, hardcoded_moves::KNIGHT_MOVES, r#move::{CastlingMethod, Move, MoveFlag}, piece::{self, Color, Piece}, square::*, utils::{self, print_bitboard}
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -38,10 +38,10 @@ impl BitBoards {
     }
 
     pub fn sliding_pieces(&self, color: Color) -> BitBoard {
-        self.0[(color as u8) as usize]
-            & (self.0[(Piece::Bishop as u8) as usize]
-                | self.0[(Piece::Rook as u8) as usize]
-                | self.0[(Piece::Queen as u8) as usize])
+        self.get_piece_set(Piece::Bishop, Some(color))
+            |         self.get_piece_set(Piece::Queen, Some(color))
+|         self.get_piece_set(Piece::Rook, Some(color))
+
     }
 
     pub fn remove_piece(&mut self, piece: Piece, color: Color, square: Square) {
@@ -187,7 +187,6 @@ impl Board {
         None
     }
 
-
     pub fn undo_move(&mut self, mv: Move) -> Option<()> {
         //println!("DEBUG: UndoMove(mv = {:?}), Turn: {:?}", mv, self.turn.opponent());
 
@@ -200,8 +199,7 @@ impl Board {
             Some(v) => v,
         };
 
-    
-       self.turn = self.turn.opponent();
+        self.turn = self.turn.opponent();
 
         match mv.flag {
             MoveFlag::EnPassant(_t) => {
@@ -276,16 +274,12 @@ impl Board {
 
         // halfmove clock!!
 
-      //  self.turn = self.turn.opponent();
+        //  self.turn = self.turn.opponent();
 
         Some(())
     }
 
-
-
     pub fn do_move(&mut self, mv: Move) -> Option<()> {
-
-
         let piece = match self.get_piece_type(mv.starting_square) {
             None => {
                 print_bitboard(self.bitboards.all_pieces(None));
@@ -375,9 +369,8 @@ impl Board {
 
         // halfmove clock!!
 
-//    println!("Move  {}:", mv);
- //       print_bitboard(self.bitboards.all_pieces(None));
-
+        //    println!("Move  {}:", mv);
+        //       print_bitboard(self.bitboards.all_pieces(None));
 
         self.turn = self.turn.opponent();
 
@@ -385,7 +378,6 @@ impl Board {
     }
 
     pub fn generate_moves(&mut self, color: Color) -> Vec<Move> {
-        
         let mut move_bitboards: HashMap<Square, BitBoard> = HashMap::new();
         let mut out = vec![];
 
@@ -396,9 +388,9 @@ impl Board {
         self.bitboards.0[BitBoards::ad_bitboard(color)] |= king_moves;
         move_bitboards.insert(self.king_square(color), king_moves);
 
-        let (_pinners, pinned, checkers);
+        let (pinned, checkers);
 
-        (_pinners, pinned, checkers) = self.pinned_pieces(color);
+        (pinned, checkers) = self.pinned_pieces(color);
 
         for pawn in Self::isolate_pieces(pawns) {
             let square = Square::index(pawn.0.trailing_zeros() as _);
@@ -424,14 +416,14 @@ impl Board {
                     moves =
                         self.hacky_rook_fix_moves(color, square, piece_board.0, relevant_blockers)
                 } else {*/
-                    moves = self.slider_moves(
-                        piece
-                            .sliders()
-                            .expect("Tried to query sliders moves for a non-slider piece"),
-                        color,
-                        piece_board.0,
-                        relevant_blockers,
-                    );
+                moves = self.slider_moves(
+                    piece
+                        .sliders()
+                        .expect("Tried to query sliders moves for a non-slider piece"),
+                    color,
+                    piece_board.0,
+                    relevant_blockers,
+                );
                 //}
 
                 moves = (moves & !self.pieces(color)) & piece.possible_moves(square);
@@ -471,32 +463,31 @@ impl Board {
 
         let mut move_bitboards_v = move_bitboards.into_iter().collect::<Vec<_>>();
 
-        move_bitboards_v.sort_by_key(|f|f.0);
+        move_bitboards_v.sort_by_key(|f| f.0);
 
-        'conv: for (sq, bitboard) in move_bitboards_v {
+        'conv: for (sq, mut bitboard) in move_bitboards_v {
             //println!("moves for piece on {}: {}", sq,bitboard.0.count_ones());
 
             /*if sq == Square::A6 {
                 print_bitboard(bitboard);
             }*/
 
-            if sq.bitboard() & self.pieces(color.opponent()) != BitBoard::EMPTY{
+            if sq.bitboard() & self.pieces(color.opponent()) != BitBoard::EMPTY {
                 // eprintln!("BUG: Tried to to move an opponent's piece on {}", sq);
                 continue;
             }
 
+            if pinned.contains_key(&sq) {
+                eprint!("INFO: Restricting Pinned Piece on {}", sq);
 
-            if (sq.bitboard() & pinned) != BitBoard::EMPTY {
-                continue;
+                bitboard = bitboard & *pinned.get(&sq).unwrap();
             }
-            
+
             for target_sq in bitboard.active_squares() {
                 if target_sq.bitboard() & self.pieces(color) != BitBoard::EMPTY {
-                   //  eprintln!("BUG: Tried to capture a same-colored piece {}x{}.", sq, target_sq);
+                    //  eprintln!("BUG: Tried to capture a same-colored piece {}x{}.", sq, target_sq);
                     continue;
                 }
-
-            
 
                 let piece = self.get_piece_type(sq).expect("failed to get piece type.");
 
@@ -531,7 +522,7 @@ impl Board {
                             continue;
                         }
                     } else if checks > 1 && piece != Piece::King {
-                    /*println!(
+                        /*println!(
                             "Filtered Move: {}",
                             Move {
                                 starting_square: sq,
@@ -598,14 +589,9 @@ impl Board {
 
     pub fn do_str_moves(&mut self, moves: &str) {
         for mv in moves.split_whitespace() {
-            
-
             let start = Square::from_str(&mv[0..=1]).unwrap();
             let target = Square::from_str(&mv[2..=3]).unwrap();
-
-        
         }
-
     }
 
     pub fn isolate_pieces(board: BitBoard) -> Vec<BitBoard> {
@@ -628,8 +614,7 @@ impl Board {
     pub fn pawn_moves(&self, pawn: BitBoard, color: Color) -> (BitBoard, BitBoard) {
         assert!(pawn.is_single());
 
-       // println!("Generating pawn  moves"); // 100ns -> 1µs of avg. time per node in perft()....
-
+        // println!("Generating pawn  moves"); // 100ns -> 1µs of avg. time per node in perft()....
 
         let square = Square::index(pawn.0.trailing_zeros() as _);
 
@@ -747,17 +732,17 @@ impl Board {
         color: Color,
         start_position: u64,
         relevant_blockers: BitBoard,
-        
     ) -> BitBoard {
         let mut out = BitBoard::EMPTY;
 
         for slider in sliders {
             let mut position = start_position;
 
-
-
             for _ in 1..8 {
-                position = utils::safe_shr(utils::safe_shl(position, slider.left as _), slider.right as _);
+                position = utils::safe_shr(
+                    utils::safe_shl(position, slider.left as _),
+                    slider.right as _,
+                );
 
                 out |= BitBoard(position);
 
@@ -765,7 +750,7 @@ impl Board {
                     break;
                 }
 
-               /* if position & BitBoard::CORNERS.0 != 0 {
+                /* if position & BitBoard::CORNERS.0 != 0 {
                     break;
                 }*/
             }
@@ -789,9 +774,11 @@ impl Board {
         }
     }
 
+  
     // (enemy pieces that pin a piece, pinned pieces, checkers)
-    pub fn pinned_pieces(&mut self, color: Color) -> (BitBoard, BitBoard, (u32, BitBoard)) {
-        let mut out = (BitBoard::EMPTY, BitBoard::EMPTY, (0, BitBoard::EMPTY));
+    pub fn pinned_pieces(&mut self, color: Color) -> (HashMap<Square, BitBoard>, (u32, BitBoard)) {
+        let mut out = (0, BitBoard::EMPTY);
+        let mut pinned_pieces = HashMap::new();
 
         let mut position;
 
@@ -805,51 +792,75 @@ impl Board {
                     .bitboards
                     .get_piece_set(Piece::Pawn, Some(color.opponent())));
 
-        out.2 .0 += checkers.0.count_ones();
-        out.2 .1 |= checkers;
+        out.0 += checkers.0.count_ones();
+        out.1 |= checkers;
+
+        println!();
+
+
 
         for slider in Piece::Queen.sliders().unwrap() {
             position = self.bitboards.get_piece_set(Piece::King, Some(color));
+
+            //let v = Piece::Queen.possible_moves(Square::index(position.0.trailing_zeros() as _)) & self.bitboards.sliding_pieces(color.opponent());
+        
+            //print_bitboard(v);
 
             let mut pinned = None;
 
             let mut ray = position;
 
             for _index in 1..8 {
-                position = BitBoard(utils::safe_shr(utils::safe_shl(position.0, slider.left as _),slider.right as _));
+                position = BitBoard(utils::safe_shr(
+                    utils::safe_shl(position.0, slider.left as _),
+                    slider.right as _,
+                ));
 
                 ray |= position;
 
                 if position & self.pieces(color) != BitBoard::EMPTY {
+
+                    
+
                     if pinned.is_some() {
                         break;
+                    
                     }
 
                     pinned = Some(Square::index(position.0.trailing_zeros() as _));
+
+                    continue;
                 }
 
-                let enemy_piece = position & self.bitboards.sliding_pieces(color.opponent());
+                let enemy_piece = position & (self.bitboards.sliding_pieces(color));
+
+                if position == Square::A5.bitboard() {
+                    print!("HIT");
+                }
 
                 if enemy_piece != BitBoard::EMPTY {
+                   // print_bitboard(enemy_piece);
+
+                    println!("PIN ON {:?}", Square::index(position.0.trailing_zeros() as _));
+
+
                     // In Check
                     if pinned.is_none() {
-                        out.2 .1 |= ray;
-                        out.2 .0 += 1;
+                        out.1 |= ray;
+                        out.0 += 1;
 
                         break;
                     }
 
-                    out.0 |= position;
-                    out.1 |= pinned.unwrap().bitboard();
+                    pinned_pieces.insert(pinned.unwrap(), ray);
                 }
 
-                if position & BitBoard::CORNERS != BitBoard::EMPTY {
-                    break;
-                }
+            
             }
+
         }
 
-        out
+        (pinned_pieces, out)
     }
 
     const CASTLING_SQUARES: [[(Square, Square, u64); 2]; 2] = [
