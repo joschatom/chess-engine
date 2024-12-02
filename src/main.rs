@@ -1,23 +1,32 @@
 // A Simple chess engine.
 
-use std::{io::Read, num::NonZero, time::Instant};
+use std::{
+    io::{BufRead, Read},
+    marker::PhantomData,
+    num::NonZero,
+    sync::mpsc::{channel, Receiver, Sender},
+    thread::{self, sleep},
+    time::{Duration, Instant},
+};
 
 use board::{BitBoards, Board};
 
 pub mod bitboard;
-mod tests;
 pub mod board;
 pub mod hardcoded_moves;
 pub(crate) mod macros;
 pub mod r#move;
 pub mod piece;
 pub mod square;
+mod tests;
+pub mod uci;
 pub mod utils;
 
 use piece::*;
 use r#move::Move;
 use square::Square;
 
+use uci::{UciCommand, UciFen, UciMove};
 use utils::{perft, print_bitboard};
 
 const STARTING_FEN: &'static str =
@@ -27,6 +36,162 @@ const STARTING_FEN: &'static str =
 //"5k2/1P6/8/4Pp2/8/1p6/P7/4K2R w K f6 0 1";
 //  "rnbqk1nr/pppppppp/8/2b5/8/8/PPP1P1PP/R3K2R w KQkq - 0 1";
 //"4k3/8/8/2b5/8/8/8/R3K2R w KQ - 0 1"; // NO PAWNS(O-O-O + BLOCKED O-O)
+
+#[derive(Debug, Clone)]
+pub enum EngineEvent {
+    EndGame,
+    Gameover,
+    PerftResult {
+        depth: u32,
+        count: u64,
+        root_nodes: Vec<(Move, u64)>,
+    },
+    Debug(String),
+}
+
+#[derive(Debug, Clone)]
+pub enum EngineControl {
+    UciCommand(UciCommand),
+    Terminate,
+    Perft(u32),
+}
+
+pub fn start_uci() {
+    eprintln!("Starting UCI....");
+
+    let stdin = std::io::stdin();
+
+    let (ctl, ctl_rx) = channel::<EngineControl>();
+    let (evt_tx, evt) = channel::<EngineEvent>();
+
+    let io_ctl = ctl.clone();
+
+    let engine_thread = thread::Builder::new()
+        .name("engine".to_owned())
+        .spawn(move || UciEngine::run_thread(ctl_rx, evt_tx))
+        .expect("failed to start engine thread");
+
+    thread::spawn(move || loop {
+        let mut _lock = stdin.lock();
+
+        let mut input = String::new();
+        _lock.read_line(&mut input).expect("failed to read line");
+
+        if let Some(cmd) = UciCommand::try_parse(input) {
+            let exit = cmd.clone() == UciCommand::Quit;
+
+            io_ctl.send(EngineControl::UciCommand(cmd)).unwrap();
+
+            if exit {
+                break;
+            }
+        }
+        drop(_lock);
+    });
+
+    for event in evt.iter() {
+        match event {
+            EngineEvent::Debug(msg) => {
+                println!("info string {}", msg);
+            },
+            EngineEvent::PerftResult { depth: _, count, root_nodes } 
+                => {
+                    for node in root_nodes {
+                        println!("{}: {}", node.0.notation_long(), node.1);
+                    }
+
+                    println!();
+                    println!("Count: {},", count);
+                }
+            _ => {}
+        }
+    }
+
+    eprintln!("Waiting for Engine Thread to stop...");
+    while !engine_thread.is_finished() {}
+}
+
+pub struct UciEngine<'a> {
+    evt_tx: Sender<EngineEvent>,
+    board: Board,
+    stop: bool,
+    _phantom: PhantomData<&'a ()>,
+    is_position_set: bool,
+}
+
+impl<'a> UciEngine<'a> {
+    pub(self) fn run_thread(ctl: Receiver<EngineControl>, evt: Sender<EngineEvent>) {
+        let mut instance = Self {
+            evt_tx: evt.clone(),
+            board: Board::new(),
+            stop: false,
+            _phantom: PhantomData,
+            is_position_set: false,
+        };
+
+        for control in ctl.iter() {
+            match control {
+                EngineControl::Terminate => instance.stop = true,
+                EngineControl::UciCommand(c) => match instance.handle_command(c) {
+                    Ok(()) => {}
+                    Err(e) => evt
+                        .send(EngineEvent::Debug(e.to_string()))
+                        .expect("failed to send error event"),
+                },
+                _ => {}
+            }
+
+            if instance.stop == true {
+                return;
+            }
+        }
+    }
+
+    pub fn print(&self, m: &'_ str) {
+        self.evt_tx.send(EngineEvent::Debug(m.to_owned())).unwrap()
+    }
+
+    pub fn handle_command(&mut self, cmd: UciCommand) -> Result<(), &str> {
+        match cmd {
+            UciCommand::Perft(ply) => {
+                if !self.is_position_set {
+                    self.print("position not set");
+                    return Ok(());
+                }
+
+                let mut nodes = None;
+
+                let count = utils::perft(&mut self.board, ply, ply, &mut nodes);
+
+                self.evt_tx.send(EngineEvent::PerftResult {
+                    depth: ply,
+                    count,
+                    root_nodes: nodes.unwrap_or(vec![]),
+                }).expect("failed to send perft() result");
+            }
+            UciCommand::Position { fen, moves } => {
+                let fen = fen.unwrap_or(UciFen::new(&STARTING_FEN));
+
+                self.board = Board::load_fen(fen.inner()).ok_or("error: invalid fen")?;
+
+                self.is_position_set = true;
+
+                for mv in moves {
+                    let m = self
+                        .board
+                        .uci_to_board_move(self.board.turn, mv)
+                        .ok_or("error: invalid moves")?;
+
+                    self.board.do_move(m);
+                }
+            }
+            UciCommand::Stop => todo!("UciCommand::Stop, searching is not yet implemented"),
+            _ => {}
+        }
+
+        Ok(())
+    }
+}
 
 fn main() {
     let mut board = Board::load_fen(/*""*/ STARTING_FEN.to_owned()).unwrap();
@@ -138,7 +303,7 @@ fn main() {
     print_bitboard(board.pieces(Color::White));
 
     let mut start = Instant::now();
-    let v = perft(&mut board, 4, 4);
+    let v = perft(&mut board, 4, 4, &mut None);
     let time = Instant::now() - start;
 
     start = Instant::now();
@@ -150,4 +315,6 @@ fn main() {
     );
 
     println!();
+
+    start_uci();
 }

@@ -1,13 +1,7 @@
 use std::{cell::LazyCell, collections::HashMap, str::FromStr};
 
 use crate::{
-    bitboard::{self, BitBoard},
-    hardcoded_moves::KNIGHT_MOVES,
-    piece::{self, Color, Piece},
-    r#move::{CastlingMethod, Move, MoveFlag},
-    square::*,
-    utils::{self, print_bitboard},
-    Slider,
+    bitboard::{self, BitBoard}, hardcoded_moves::KNIGHT_MOVES, r#move::{CastlingMethod, Move, MoveFlag}, piece::{self, Color, Piece}, square::*, uci::UciMove, utils::{self, print_bitboard}, Slider
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -380,6 +374,52 @@ impl Board {
         self.turn = self.turn.opponent();
 
         Some(())
+    }
+
+    pub fn uci_to_board_move(&self, color: Color, mv: UciMove) -> Option<Move> {
+        let piece = self.get_piece_type(mv.starting_square)?;
+
+
+        if piece == Piece::Pawn && (mv.target_square.rank() == color.promotion_rank()) {
+            return Some(Move {
+                starting_square: mv.starting_square,
+                target_square: mv.target_square,
+                flag: MoveFlag::Promotion(mv.promotion?),
+            });
+        }
+
+        if piece == Piece::Pawn
+            && (mv.target_square.bitboard() & self.en_passant != BitBoard::EMPTY)
+        {
+            return Some(Move {
+                starting_square: mv.starting_square,
+                target_square: mv.target_square,
+                flag: MoveFlag::EnPassant(Square::index(
+                    mv.target_square.bitboard().backward(self.turn).0.trailing_zeros() as usize,
+                )),
+            });
+        }
+
+        'capture: {if (mv.target_square.bitboard() & self.bitboards.all_pieces(Some(color.opponent())))
+            != BitBoard::EMPTY
+        {
+            if self.squares[mv.target_square as usize].is_none() {
+                break 'capture;
+            }
+
+            return Some(Move {
+                starting_square: mv.starting_square,
+                target_square: mv.target_square,
+                flag: MoveFlag::Capture(self.squares[mv.target_square as usize].unwrap().1),
+            });
+
+        } }
+
+        return Some(Move {
+            starting_square: mv.starting_square,
+            target_square: mv.target_square,
+            flag: MoveFlag::None,
+        });
     }
 
     pub fn generate_moves(&mut self, color: Color) -> Vec<Move> {

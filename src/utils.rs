@@ -33,7 +33,12 @@ pub fn safe_shr(v: u64, b: u32) -> u64 {
     }
 }
 
-pub fn perft(board: &mut Board, start_depth: u32, depth: u32) -> u64 {
+pub fn perft(
+    board: &mut Board,
+    start_depth: u32,
+    depth: u32,
+    root_nodes: &mut Option<Vec<(Move, u64)>>,
+) -> u64 {
     if depth == 0 {
         // println!("{}", path);
 
@@ -56,45 +61,19 @@ pub fn perft(board: &mut Board, start_depth: u32, depth: u32) -> u64 {
 
         // println!("{} {}", path, r#move);
 
-        let before = board.turn;
-
         //:w;:wprint_bitboard(board.bitboards.0[BitBoards::ad_bitboard(board.turn.opponent())]);
         board.do_move(r#move).unwrap();
 
-        res = perft(board, start_depth, depth - 1);
+        res = perft(board, start_depth, depth - 1, root_nodes);
         board.undo_move(r#move).unwrap();
-
-        let after = board.turn;
-
-        if before != after {
-            eprintln!("Undo/Do Move is borken,");
-        }
 
         nodes += res;
 
         if depth == start_depth {
-            let piece = board
-                .get_piece_type(r#move.starting_square)
-                .expect("...? 01");
-
-            if piece == Piece::Pawn {
-                println!(
-                    "({}{}) {} {}",
-                    r#move.starting_square.to_string().to_lowercase(),
-                    r#move.target_square.to_string().to_lowercase(),
-                    r#move.target_square.to_string().to_lowercase(),
-                    res
-                );
-            } else {
-                println!(
-                    "({}{}) {}{} {}",
-                    r#move.starting_square.to_string().to_lowercase(),
-                    r#move.target_square.to_string().to_lowercase(),
-                    piece.notation(),
-                    r#move.target_square.to_string().to_lowercase(),
-                    res
-                );
+            if root_nodes.is_none() {
+                *root_nodes = Some(vec![]);
             }
+            root_nodes.as_mut().unwrap().push((r#move, res));
 
             // print_bitboard(board.bitboards.0[BitBoards::ad_bitboard(board.turn)])
         }
@@ -214,6 +193,7 @@ use std::fmt::format;
 use crate::{
     bitboard::BitBoard,
     board::{self, BitBoards, Board},
+    r#move::Move,
     square::Square,
     Color, Piece,
 };

@@ -23,7 +23,7 @@ mod perft{
         for depth in 1..=4 {
             eprintln!("Running Perft({})...", depth);
 
-            let res = utils::perft(&mut board, depth, depth);
+            let res = utils::perft(&mut board, depth, depth, &mut None);
 
             assert_eq!(res, RESULTS[depth as usize], "Perft({}) returned an incorrect value.", depth);
         }

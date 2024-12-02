@@ -7,6 +7,18 @@ pub struct Move {
     pub flag: MoveFlag,
 }
 
+impl Move {
+    pub fn notation_long(&self) -> String {
+        let promotion = match  self.flag{
+            MoveFlag::Promotion(p) => p.notation().to_string(),
+            _ => "".to_owned(),
+        };
+
+        format!("{}{}{}", self.starting_square, self.target_square, promotion)
+    }
+}
+
+
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MoveFlag {

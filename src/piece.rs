@@ -28,7 +28,7 @@ impl Slider {
     }
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq, IntEnum)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, IntEnum, ::strum_macros::EnumString, ::strum_macros::Display)]
 #[repr(u8)]
 pub enum Piece {
     King = 2,
@@ -60,6 +60,18 @@ impl Piece {
             Self::Pawn => 'P',
             Self::Rook => 'R',
         }
+    }
+
+    pub fn from_notation(c: char) -> Option<Self> {
+        Some(match c {
+            'K' => Self::King,
+            'Q' => Self::Queen,
+            'N' => Self::Knight,
+            'B' => Self::Bishop,
+            'P' => Self::Pawn,
+            'R' => Self::Rook,
+            _ => None?,
+        })
     }
 
     pub fn possible_moves(&self, square: Square) -> BitBoard {
